@@ -399,6 +399,12 @@ class CameraController(
         if (l != null) l.onError(message) else onCameraError?.invoke(message)
     }
 
+    /** 用户主动取消：仅当确实处于拍摄流程时才中断并恢复预览 */
+    fun cancelStack() {
+        val handler = backgroundHandler ?: return
+        handler.post { if (listener != null) fail("拍摄已取消") }
+    }
+
     /**
      * 根据屏幕旋转和传感器方向，修正 TextureView 的显示方向与比例。
      * 对 0/90/180/270 所有角度统一做"保持宽高比 + 中心裁切填满"，避免预览被拉伸变形。

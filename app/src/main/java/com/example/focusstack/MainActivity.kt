@@ -41,10 +41,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnCapture: Button
     private lateinit var btnSave: Button
     private lateinit var btnRetake: Button
+    private lateinit var btnCancelCapture: Button
 
     private lateinit var cameraController: CameraController
     private var lastResultBitmap: Bitmap? = null
     private var isCapturing = false
+    private var isSaving = false
     private var resumed = false
 
     /** 合成专用单线程：保证同一次拍摄的图片按序处理，也防止重复触发合成 */
@@ -64,6 +66,7 @@ class MainActivity : AppCompatActivity() {
         btnCapture = findViewById(R.id.btnCapture)
         btnSave = findViewById(R.id.btnSave)
         btnRetake = findViewById(R.id.btnRetake)
+        btnCancelCapture = findViewById(R.id.btnCancelCapture)
 
         cameraController = CameraController(this, textureView)
         cameraController.onPreviewReady = { runOnUiThread { applyTransform() } }
@@ -86,6 +89,8 @@ class MainActivity : AppCompatActivity() {
         btnCapture.setOnClickListener { startCaptureStack() }
         btnSave.setOnClickListener { saveResult() }
         btnRetake.setOnClickListener { backToPreview() }
+        // 用户主动取消：CameraController 会回调 onError("拍摄已取消")，由此统一复位界面
+        btnCancelCapture.setOnClickListener { cameraController.cancelStack() }
     }
 
     override fun onResume() {
@@ -241,6 +246,7 @@ class MainActivity : AppCompatActivity() {
         resultImageView.setImageBitmap(bitmap)
         btnCapture.visibility = View.GONE
         btnSave.visibility = View.VISIBLE
+        btnSave.isEnabled = true
         btnRetake.visibility = View.VISIBLE
     }
 
@@ -263,15 +269,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveResult() {
         val bitmap = lastResultBitmap ?: return
+        if (isSaving) return
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && !hasStoragePermission()) {
+            // 旧系统先申请存储权限，授权后由用户再点一次保存
+            ActivityCompat.requestPermissions(
+                this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQUEST_STORAGE_PERMISSION
+            )
+            return
+        }
+
+        // 保存期间禁用按钮，避免重复点击保存出多张相同照片
+        isSaving = true
+        btnSave.isEnabled = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             executeQuietly(ioExecutor) { saveWithMediaStore(bitmap) }
         } else {
-            if (!hasStoragePermission()) {
-                ActivityCompat.requestPermissions(
-                    this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQUEST_STORAGE_PERMISSION
-                )
-                return
-            }
             executeQuietly(ioExecutor) { saveToLegacyFile(bitmap) }
         }
     }
@@ -282,16 +295,33 @@ class MainActivity : AppCompatActivity() {
             put(MediaStore.Images.Media.DISPLAY_NAME, "FocusStack_${System.currentTimeMillis()}.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FocusStack")
+            // 写入完成前标记为 pending，避免相册提前读到半张图
+            put(MediaStore.Images.Media.IS_PENDING, 1)
         }
         val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
         if (uri == null) {
             showToast("保存失败")
+            finishSaving()
             return
         }
-        val ok = contentResolver.openOutputStream(uri)?.use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
-        } ?: false
-        showToast(if (ok) "已保存到相册 / Pictures/FocusStack" else "保存失败")
+        val ok = try {
+            contentResolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+            } ?: false
+        } catch (e: Exception) {
+            false
+        }
+        if (ok) {
+            // 写入完成，解除 pending，相册才会正式展示
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+            showToast("已保存到相册 / Pictures/FocusStack")
+        } else {
+            contentResolver.delete(uri, null, null)
+            showToast("保存失败")
+        }
+        finishSaving()
     }
 
     /** Android 9 及以下：直接写文件并通知相册扫描 */
@@ -305,6 +335,15 @@ class MainActivity : AppCompatActivity() {
             showToast("已保存到相册 / Pictures/FocusStack")
         } catch (e: IOException) {
             showToast("保存失败：${e.message}")
+        }
+        finishSaving()
+    }
+
+    /** 保存结束（成功或失败）后恢复按钮状态 */
+    private fun finishSaving() {
+        runOnUiThread {
+            isSaving = false
+            btnSave.isEnabled = true
         }
     }
 

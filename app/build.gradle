@@ -3,6 +3,13 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// 读取签名配置（keystore.properties 已在 .gitignore 中，不会提交）
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+}
+
 android {
     namespace 'com.example.focusstack'
     compileSdk 34
@@ -15,9 +22,24 @@ android {
         versionName "2.0"
     }
 
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            // 有签名配置时用开发签名（Wxf8555），否则回退为未签名
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 

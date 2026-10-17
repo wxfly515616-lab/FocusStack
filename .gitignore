@@ -12,3 +12,8 @@ local.properties
 
 # 系统
 .DS_Store
+
+# 签名文件与密码（含私钥，绝对不要提交）
+keystore.properties
+*.jks
+*.keystore

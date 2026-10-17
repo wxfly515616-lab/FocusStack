@@ -53,6 +53,13 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="正在拍摄第 1/7 张..." />
+
+        <Button
+            android:id="@+id/btnCancelCapture"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="取消拍摄" />
     </LinearLayout>
 
     <!-- 底部操作栏 -->

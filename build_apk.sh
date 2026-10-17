@@ -1,8 +1,12 @@
 #!/bin/bash
 # 一键编译 APK（不需要 Android Studio）
-# 用法：在终端里执行  ./build_apk.sh
+# 用法：
+#   ./build_apk.sh            # 打正式签名包（release，签名 Wxf8555）
+#   ./build_apk.sh debug      # 打调试包（debug）
 set -e
 cd "$(dirname "$0")"
+
+MODE="${1:-release}"
 
 # 1) locate JDK 17（Adoptium 解压版，放在 ~/android-toolchain）
 JDK_DIR="$(ls -d "$HOME"/android-toolchain/jdk-17* 2>/dev/null | head -1)"
@@ -29,8 +33,13 @@ echo "ANDROID_HOME=$ANDROID_HOME"
 echo
 
 # 4) build
-"$GRADLE" assembleDebug
+if [ "$MODE" = "debug" ]; then
+  "$GRADLE" assembleDebug
+  APK="app/build/outputs/apk/debug/app-debug.apk"
+else
+  "$GRADLE" assembleRelease
+  APK="app/build/outputs/apk/release/app-release.apk"
+fi
 
-APK="app/build/outputs/apk/debug/app-debug.apk"
 echo
 echo "编译完成：$(pwd)/$APK"
