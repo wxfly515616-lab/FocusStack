@@ -1,0 +1,14 @@
+# 构建产物
+build/
+app/build/
+.gradle/
+
+# 本机配置（含有 SDK 路径，不要提交）
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# 系统
+.DS_Store

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 四角对焦框 -->
+    <path
+        android:pathData="M33,47 L33,33 L47,33 M61,33 L75,33 L75,47 M75,61 L75,75 L61,75 M47,75 L33,75 L33,61"
+        android:strokeColor="#2FE6C8"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent" />
+
+    <!-- 中心对焦圆环 (r=8, stroke 3, 白色) -->
+    <path
+        android:pathData="M62,54 A8,8 0 0,1 54,62 A8,8 0 0,1 46,54 A8,8 0 0,1 54,46 A8,8 0 0,1 62,54"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:fillColor="@android:color/transparent" />
+
+    <!-- 中心对焦点 (r=2.5, #2FE6C8) -->
+    <path
+        android:pathData="M56.5,54 A2.5,2.5 0 0,1 54,56.5 A2.5,2.5 0 0,1 51.5,54 A2.5,2.5 0 0,1 54,51.5 A2.5,2.5 0 0,1 56.5,54 Z"
+        android:fillColor="#2FE6C8" />
+
+</vector>
