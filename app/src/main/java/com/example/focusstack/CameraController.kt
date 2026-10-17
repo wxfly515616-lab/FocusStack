@@ -373,6 +373,7 @@ class CameraController(
         backgroundHandler?.removeCallbacks(imageTimeoutRunnable)
         val buffer = image.planes[0].buffer
         val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes) // 必须先把 JPEG 数据读出来，再归还 Image
         image.close()
 
         val l = listener ?: return // 已经失败或取消，丢弃
