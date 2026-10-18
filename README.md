@@ -5,8 +5,13 @@
 
 ![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-3DDC84?logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-1.9.22-7F52FF?logo=kotlin&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Version](https://img.shields.io/badge/version-2.0-blue)
+[![Android CI](https://github.com/wxfly515616-lab/FocusStack/actions/workflows/android.yml/badge.svg)](https://github.com/wxfly515616-lab/FocusStack/actions/workflows/android.yml)
+[![Release](https://img.shields.io/github/v/release/wxfly515616-lab/FocusStack?label=%F0%9F%93%A6%20APK)](https://github.com/wxfly515616-lab/FocusStack/releases)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/wxfly515616-lab/FocusStack?style=social)](https://github.com/wxfly515616-lab/FocusStack/stargazers)
+
+> ⭐ 如果这个项目对你有帮助，欢迎点一下右上角的 **Star** —— 这是对开发者最大的鼓励，也能让更多人发现它。
+> ⭐ If this project helps you, please give it a Star — it helps others discover it too!
 
 [简体中文](#简体中文) | [English](#english) · [开发文档](docs/DEVELOPMENT.md) · [路线图](docs/ROADMAP.md) · [贡献指南](CONTRIBUTING.md)
 
