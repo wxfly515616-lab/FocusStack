@@ -97,8 +97,9 @@
 - **验收标准**：按测试矩阵逐项手动验证并记录；`adb logcat` 无异常；LeakCanary（可选）无泄漏。
 - **难度**：🟡
 
-#### [ ] R6 关闭调试开关并保护隐私
+#### [x] R6 关闭调试开关并保护隐私（✅ 已随 v2.0 完成）
 
+- **已完成**：调试帧保存逻辑（`debugKeepFrames` / `saveDebugFrame` / `debugScores`）已整体移除，Release 与 Debug 均无任何调试写盘入口；如未来需要调试，建议按下方思路以 `BuildConfig.DEBUG` 重新引入。
 - **现状**：`MainActivity.debugKeepFrames = true`，每次拍摄会把每张原始 JPEG 额外写入 `Pictures/FocusStack/_debug`，正式用户也会触发，属于隐私与存储风险。
 - **目标**：Debug 构建才允许保存调试帧，Release 默认关闭且无入口。
 - **实现建议**：改用 `BuildConfig.DEBUG`；调试帧建议写到应用私有目录并在退出时清理；增加开发者选项开关。
@@ -196,7 +197,6 @@
 
 | 任务 | 说明 | 难度 |
 | --- | --- | --- |
-| R6 关闭调试开关 | 一行改动 + 验证，最推荐的第一 PR | 🟢 |
 | R14 文件重命名与死代码清理 | 纯重构，不影响行为 | 🟢 |
 | 把某一界面的文案迁入 `strings.xml` | R7 的子任务，可只做一个界面 | 🟢 |
 | 补充 README 的 FAQ / 故障排查 | 文档类，基于真实使用经验 | 🟢 |
@@ -313,8 +313,9 @@ Difficulty: 🟢 newcomer-friendly · 🟡 Android experience needed · 🔴 alg
 - **Acceptance criteria**: Manual test matrix recorded; clean `adb logcat`; no LeakCanary leaks (optional).
 - **Difficulty**: 🟡
 
-#### [ ] R6 Disable the debug switch and protect privacy
+#### [x] R6 Disable the debug switch and protect privacy (✅ done in v2.0)
 
+- **Done**: The debug-frame saving logic (`debugKeepFrames` / `saveDebugFrame` / `debugScores`) has been removed entirely; neither release nor debug builds have any debug write path. If debugging is needed again in the future, re-introduce it behind `BuildConfig.DEBUG` as described below.
 - **Current state**: `MainActivity.debugKeepFrames = true` saves every source JPEG to `Pictures/FocusStack/_debug` — including in release builds. Privacy and storage risk.
 - **Goal**: Only debug builds can keep frames; release builds have it off with no UI entry.
 - **Hints**: Use `BuildConfig.DEBUG`; write debug frames to app-private storage and clean up; add a developer-options toggle.
@@ -412,7 +413,6 @@ Difficulty: 🟢 newcomer-friendly · 🟡 Android experience needed · 🔴 alg
 
 | Task | Notes | Difficulty |
 | --- | --- | --- |
-| R6 disable debug switch | One-line change + verification; best first PR | 🟢 |
 | R14 rename file & remove dead code | Pure refactor, no behavior change | 🟢 |
 | Move one screen's strings into `strings.xml` | Sub-task of R7; one screen per PR | 🟢 |
 | Expand README FAQ / troubleshooting | Documentation, based on real usage | 🟢 |
