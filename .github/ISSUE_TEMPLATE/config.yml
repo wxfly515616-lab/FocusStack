@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 阅读贡献指南 / Read the contributing guide
+    url: https://github.com/wxfly515616-lab/FocusStack_v2/blob/main/CONTRIBUTING.md
+    about: 提交 Issue 前请先阅读 CONTRIBUTING.md，了解如何提供有效信息。 / Please read CONTRIBUTING.md before filing an issue.
+  - name: 查看路线图 / View the roadmap
+    url: https://github.com/wxfly515616-lab/FocusStack_v2/blob/main/docs/ROADMAP.md
+    about: 想参与开发？先看看路线图中是否有你感兴趣的任务。 / Want to contribute? Check the roadmap for open tasks.

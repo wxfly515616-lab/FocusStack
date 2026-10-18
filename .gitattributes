@@ -1,0 +1,39 @@
+# 默认行为：自动识别文本文件，仓库内统一使用 LF 换行
+* text=auto eol=lf
+
+# 构建/脚本：保证换行符与平台约定一致
+gradlew            text eol=lf
+gradlew.bat        text eol=crlf
+*.sh               text eol=lf
+*.bat              text eol=crlf
+*.cmd              text eol=crlf
+*.properties       text eol=lf
+*.gradle           text eol=lf
+*.kts              text eol=lf
+
+# 二进制文件：不做换行转换，也不做文本 diff
+*.png              binary
+*.jpg              binary
+*.jpeg             binary
+*.webp             binary
+*.gif              binary
+*.ico              binary
+*.jar              binary
+*.jks              binary
+*.keystore         binary
+*.apk              binary
+*.aab              binary
+*.zip              binary
+
+# linguist：语言统计以 Kotlin 源码为主，文档/图片/包装脚本不计入或按文档处理
+*.kt               linguist-language=Kotlin
+*.kts              linguist-language=Kotlin
+app/src/main/res/** linguist-detectable=false
+docs/**            linguist-documentation
+*.md               linguist-documentation
+*.png              linguist-documentation
+*.jpg              linguist-documentation
+gradlew            linguist-vendored linguist-detectable=false
+gradlew.bat        linguist-vendored linguist-detectable=false
+gradle/**          linguist-vendored linguist-detectable=false
+*.sh               linguist-detectable=false

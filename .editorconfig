@@ -1,0 +1,45 @@
+root = true
+
+# 通用规则
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Kotlin / Java 源码：官方风格，4 空格缩进
+[*.{kt,kts,java}]
+indent_size = 4
+
+# Android 资源等 XML：4 空格缩进
+[*.xml]
+indent_size = 4
+
+# Gradle 脚本
+[*.{gradle,properties}]
+indent_size = 4
+
+# Markdown 中行尾两个空格有意义（换行），不要自动删除
+[*.md]
+trim_trailing_whitespace = false
+
+# YAML（GitHub Actions / Issue 模板）：2 空格缩进
+[*.{yml,yaml}]
+indent_size = 2
+
+# Shell 脚本强制 LF 且保留行尾空白（不应出现）
+[*.sh]
+indent_size = 2
+
+# Windows 批处理文件：CRLF
+[*.{bat,cmd}]
+end_of_line = crlf
+indent_size = 2
+
+# Gradle wrapper 脚本换行约定
+[gradlew]
+end_of_line = lf
+[gradlew.bat]
+end_of_line = crlf

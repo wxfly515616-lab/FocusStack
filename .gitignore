@@ -17,3 +17,17 @@ local.properties
 keystore.properties
 *.jks
 *.keystore
+
+# 构建产物与打包文件
+*.apk
+*.aab
+
+# Kotlin / Gradle 缓存与 JVM 分析文件
+.kotlin/
+*.hprof
+
+# 调试帧与截图输出
+captures/
+
+# 本地临时实验/调试文件（离线算法实验、截图、拉下来的连拍原图等）
+.scratch/

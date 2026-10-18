@@ -6,6 +6,8 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- 应用依赖后置摄像头，但显式声明通用 camera 特性为非必需，避免 ChromeOS 设备被误判（lint: PermissionImpliesUnsupportedChromeOsHardware） -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.back" />
     <uses-feature android:name="android.hardware.camera.level.full" android:required="false" />
 

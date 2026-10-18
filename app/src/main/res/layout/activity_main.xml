@@ -28,6 +28,16 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- 点按对焦的对焦框 -->
+    <View
+        android:id="@+id/focusRing"
+        android:layout_width="90dp"
+        android:layout_height="90dp"
+        android:background="@drawable/focus_ring"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
     <!-- 处理中提示 -->
     <LinearLayout
         android:id="@+id/progressLayout"
@@ -78,7 +88,7 @@
             android:layout_height="wrap_content"
             android:text="重拍"
             android:visibility="gone"
-            android:layout_marginEnd="24dp" />
+            android:layout_marginEnd="20dp" />
 
         <Button
             android:id="@+id/btnCapture"
@@ -87,13 +97,32 @@
             android:text="拍摄合成" />
 
         <Button
+            android:id="@+id/btnPickPhotos"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="20dp"
+            android:text="相册合成" />
+
+        <Button
             android:id="@+id/btnSave"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="保存到相册"
             android:visibility="gone"
-            android:layout_marginStart="24dp" />
+            android:layout_marginStart="20dp" />
 
     </LinearLayout>
+
+    <!-- 使用说明 / 帮助 -->
+    <Button
+        android:id="@+id/btnHelp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="12dp"
+        android:minWidth="0dp"
+        android:text="帮助"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

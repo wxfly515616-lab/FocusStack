@@ -1,0 +1,49 @@
+name: 功能需求 / Feature Request
+description: 提出新功能或改进建议 / Suggest a new feature or improvement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你的建议！提交前请先**搜索[已有 Issue](https://github.com/wxfly515616-lab/FocusStack_v2/issues)**，确认没有重复需求。
+        请重点说明「使用场景」，而不是只描述实现方式。
+
+        Thanks for your suggestion! Please **search [existing issues](https://github.com/wxfly515616-lab/FocusStack_v2/issues)** first.
+        Focus on the use case, not only on the implementation.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 需求场景 / Use case
+      description: 你在什么场景下需要这个功能？现在遇到了什么不便？
+      placeholder: |
+        例如：拍摄花蕊时，希望合成前能预览每张照片的清晰区域，失败时可以重拍。
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 建议方案 / Proposed solution
+      description: 你希望 App 如何表现？界面、流程、结果有什么变化？
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: 可选实现思路 / Optional implementation ideas
+      description: 如果你有技术上的想法（例如 Camera2 参数、合成算法、UI 布局），可以写在这里。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 确认 / Checklist
+      options:
+        - label: 我已搜索过已有 Issue，确认这不是重复需求 / I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: 我已阅读贡献指南 / I have read CONTRIBUTING.md.
+          required: true
