@@ -163,21 +163,20 @@ flowchart LR
 ```
 
 - **CameraController**：自动对焦锁定主体 → 读取镜头实际对焦距离（屈光度）→ 以它为中心生成扫焦序列 → 每档等镜头停稳后拍 JPEG → 通过回调流式交给合成线程。所有相机操作在独立 `HandlerThread` 上执行。
-- **FocusStacker**：逐张降采样解码（12MP → 3MP）→ 灰度 → 拉普拉斯边缘强度 → 箱式模糊平滑 → 以该帧平均清晰度归一化 → 权重 `1 + (score/basis)^6` → 逐通道增益对齐 → 加权累加 → 归一化输出。计算按行分块，在线程池中并行。
+- **FocusStacker**：逐张降采样解码（12MP → 3MP）→ 灰度 → 拉普拉斯边缘强度 → 箱式模糊平滑 → 以该帧平均清晰度归一化 → 权重 `1 + (score/basis)^12` → 逐通道增益对齐 → 加权累加 → 归一化输出。计算按行分块，在线程池中并行。
 - **MainActivity**：处理权限、生命周期（后台释放相机）、相册导入、保存与界面状态；合成与保存分别跑在单线程执行器上，避免阻塞 UI。
 
 算法细节、参数表、线程与内存模型见[开发文档](docs/DEVELOPMENT.md)。
 
 ### 已知限制
 
-1. **没有图像几何对齐**：手持拍摄会重影，这是当前最大的画质瓶颈。
+1. **没有图像几何对齐**：手持拍摄会重影，这是当前最大的画质瓶颈。另外手机镜头改变对焦距离时视场角会轻微变化（呼吸效应，实测边缘可达约 35 像素位移），这也是当前只能做加权融合、不能用"逐像素挑最清晰一张"的原因。
 2. **输出只有约 3MP**（像素约 2000×1500，相机路径旋转后为约 1500×2000）：为了在手机上稳定运行做的取舍，全分辨率需要分块合成。
 3. **依赖机型支持手动对焦**：不支持 `LENS_FOCUS_DISTANCE` 的机型无法使用连拍合成。
 4. **界面仅中文**：文案硬编码，尚未迁移到 `strings.xml`，没有英文界面。
-5. **调试开关默认打开**：`MainActivity.debugKeepFrames` 当前为 `true`，会把每张原图额外保存到 `Pictures/FocusStack/_debug`；正式发布前应关闭。
-6. **缺少自动化测试与多机型验证**。
-7. **部分机型对焦步长/范围差异大**：尚未做按机型校准，个别设备可能对焦点覆盖不理想。
-8. **导入高像素照片有 OOM 风险**：工作尺寸由第一张照片决定，4800 万像素照片会占用大量内存，建议单张 ≤1200 万像素。
+5. **缺少自动化测试与多机型验证**。
+6. **部分机型对焦步长/范围差异大**：尚未做按机型校准，个别设备可能对焦点覆盖不理想。
+7. **导入高像素照片有 OOM 风险**：工作尺寸由第一张照片决定，4800 万像素照片会占用大量内存，建议单张 ≤1200 万像素。
 
 ### 路线图
 
@@ -359,21 +358,20 @@ flowchart LR
 ```
 
 - **CameraController**: auto-focus locks the subject → reads the actual lens focus distance (diopters) → builds a focus sweep around it → for each step waits until the lens settles, captures a JPEG, and streams it to the stacker. All camera work runs on a dedicated `HandlerThread`.
-- **FocusStacker**: decode each frame downsampled (12 MP → 3 MP) → grayscale → Laplacian edge response → box blur → normalize by the frame's mean sharpness → weight `1 + (score/basis)^6` → per-channel gain alignment → weighted accumulation → normalization. Rows are processed in parallel by a small thread pool.
+- **FocusStacker**: decode each frame downsampled (12 MP → 3 MP) → grayscale → Laplacian edge response → box blur → normalize by the frame's mean sharpness → weight `1 + (score/basis)^12` → per-channel gain alignment → weighted accumulation → normalization. Rows are processed in parallel by a small thread pool.
 - **MainActivity**: permissions, lifecycle (release camera in background), gallery import, saving and UI state. Fusion and saving run on dedicated single-thread executors so the UI never blocks.
 
 See the [development guide](docs/DEVELOPMENT.md) for algorithm details, parameter tables, threading and memory model.
 
 ### Known limitations
 
-1. **No geometric alignment**: handheld shots ghost; this is the main quality bottleneck.
+1. **No geometric alignment**: handheld shots ghost; this is the main quality bottleneck. The lens also changes its field of view slightly with focus distance (focus breathing — measured edge displacement of up to ~35 px), which is why fusion is weighted rather than a per-pixel winner-takes-all.
 2. **~3 MP output** (~2000×1500 pixels; ~1500×2000 after the camera-path rotation): a deliberate trade-off for stable on-device performance. Full resolution requires tiled fusion.
 3. **Requires manual-focus support**: devices that do not expose `LENS_FOCUS_DISTANCE` cannot use bracket capture.
 4. **Chinese-only UI**: strings are hard-coded and not yet extracted to `strings.xml`.
-5. **Debug switch on by default**: `MainActivity.debugKeepFrames` is currently `true`, which saves every source frame to `Pictures/FocusStack/_debug`; it must be turned off before a release.
-6. **No automated tests or multi-device validation yet**.
-7. **Focus steps vary by device**: the bracket is not calibrated per model, so coverage may be suboptimal on some phones.
-8. **High-resolution imports risk OOM**: the working size is derived from the first photo, so a 48 MP photo consumes a lot of memory; keep imports at or below 12 MP.
+5. **No automated tests or multi-device validation yet**.
+6. **Focus steps vary by device**: the bracket is not calibrated per model, so coverage may be suboptimal on some phones.
+7. **High-resolution imports risk OOM**: the working size is derived from the first photo, so a 48 MP photo consumes a lot of memory; keep imports at or below 12 MP.
 
 ### Roadmap
 
