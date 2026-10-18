@@ -2,7 +2,7 @@
 
 # FocusStack v2 开发者文档
 
-> 本文档面向第一次参与本项目的贡献者，也作为架构与实现的事实参考。所有参数值、流程顺序和回调名都以当前 `app/src/main` 源码为准，代码基准为 commit `cf3cfe7`。如果文档与代码冲突，以代码为准，并欢迎提 PR 修正。
+> 本文档面向第一次参与本项目的贡献者，也作为架构与实现的事实参考。所有参数值、流程顺序和回调名都以当前 `app/src/main` 源码为准。如果文档与代码冲突，以代码为准，并欢迎提 PR 修正。
 >
 > 当前状态：核心拍摄、合成、保存流程已在作者真机上跑通（仓库 `docs/images/` 中是实际运行截图）；但仍缺少系统化测试与多机型验证，请把本文中的行为描述理解为"当前实现"，而不是"已充分验证的规格"。
 
@@ -433,8 +433,8 @@ score(x,y) = lap(x,y)
 # 4) 该帧的清晰度基准 = 平滑后得分的均值（采样 1/128 估计），下限 1
 basis = max(mean(score), 1)
 
-# 5) 逐像素权重：清晰度相对基准的 6 次方，+1 保证最低权重
-w(x,y) = 1 + (score(x,y) / basis)^6
+# 5) 逐像素权重：清晰度相对基准的 12 次方，+1 保证最低权重
+w(x,y) = 1 + (score(x,y) / basis)^12
 
 # 6) 通道增益：把本帧每个通道的均值对齐到第一帧（同一把尺子比亮度/白平衡）
 gain[c] = refMeans[c] / mean[c]     # 仅当 mean[c] > 1，否则 1
@@ -451,8 +451,8 @@ out(x,y) = clamp(round(sum[c](x,y) / max(weightT(x,y), 1e-6)), 0, 255)
 
 - 灰度只算一次并缓存为 `ByteArray`，拉普拉斯不再每像素重复算 5 次灰度。
 - 箱式模糊用滚动求和：每行/每列初始化一次窗口和，之后"加右减左"，复杂度从 O(w·h·r) 降为 O(w·h)。
-- `basis` 用 `meanOf()` 每 128 个像素采样一次（`FocusStackProcessor.kt:291`），足够稳定且快。
-- 通道均值同样每 128 像素采样（`channelMeans()`，`FocusStackProcessor.kt:271`），避免 3MP 全量遍历。
+- `basis` 用 `meanOf()` 每 128 个像素采样一次（`FocusStackProcessor.kt:274`），足够稳定且快。
+- 通道均值同样每 128 像素采样（`channelMeans()`，`FocusStackProcessor.kt:254`），避免 3MP 全量遍历。
 - `finish()` 的除零保护下限是 `1e-6`；`rotateDegrees % 360 == 0` 时直接返回，否则用 `Matrix.postRotate` + 双线性插值旋转一次（相机模式传入 `sensorOrientation`，相册导入传 0）。
 
 #### 6.3 设计取舍（为什么这么做）
@@ -461,10 +461,13 @@ out(x,y) = clamp(round(sum[c](x,y) / max(weightT(x,y), 1e-6)), 0, 255)
 虚化区域并非真正均匀：传感器噪声、JPEG 压缩会在虚化背景里产生随机彩噪，而"选最大值"很容易把某张的噪声误判成清晰像素，结果出现彩色斑点和硬接缝。加权融合下，没有细节的区域各帧 `score/basis ≈ 1`、权重都 ≈1，等于把多张**平均**，噪声互相抵消、虚化过渡自然；只有在真正有边缘的位置，最清晰那帧的权重大幅领先。代价是需要保留累加器（内存），以及各帧轻微错位会被平均成更复杂的重影（见限制章节）。
 
 **为什么用均值归一化，而不是分位数？**
-清晰度分数的量纲随画面整体对比度变化：同一场景曝光/白平衡不同，`score` 整体会缩放。如果拿每帧的 95 分位或一个全局固定基准去比，等于用不同的尺子量不同照片：分位数对"少量高对比边缘"特别敏感，会把细节多的帧基准抬高，导致权重系统性偏低。用"该帧自身的平均清晰度"做基准，正好抵消整体缩放，使不同帧的 `score/basis` 可以互相比较。文件里遗留的 `percentile()` / `HIST_*` 是早期方案，已不再调用。
+清晰度分数的量纲随画面整体对比度变化：同一场景曝光/白平衡不同，`score` 整体会缩放。如果拿每帧的 95 分位或一个全局固定基准去比，等于用不同的尺子量不同照片：分位数对"少量高对比边缘"特别敏感，会把细节多的帧基准抬高，导致权重系统性偏低。用"该帧自身的平均清晰度"做基准，正好抵消整体缩放，使不同帧的 `score/basis` 可以互相比较。（早期版本用过「逐帧分位数 + 累积全局基准」的组合，这是**错误的**：先处理的帧基准偏小、权重被放大几十倍，会把虚化帧的像素压过后面清晰帧，成片整块发软，已废弃。）
 
-**六次方的意义？**
-权重曲线 `1 + r^6` 是一个软选择：`r = 1`（该帧平均水平）权重 2，`r = 2` 权重 65，`r = 3` 权重 730——最清晰帧会以数量级压制其它帧，避免虚化帧"渗"进结果造成发软；`r < 1` 的区域权重都趋近 1，退化为平均。指数越大选择越"硬"（接缝风险越大），越小越平滑（可能略软）。`SMOOTH_RADIUS` 与指数是调节清晰度/自然度的主要旋钮。
+**十二次方的意义？**
+权重曲线 `1 + r^12` 是一个软选择：`r = 1`（该帧平均水平）权重 2，`r = 2` 权重 4096，`r = 3` 权重 531441——最清晰帧会以数量级压制其它帧，避免虚化帧"渗"进结果造成发软；`r < 1` 的区域权重都趋近 1，退化为平均。指数越大选择越"硬"（接缝风险越大），越小越平滑（可能略软）。指数必须足够陡：白纸小字这类低对比度主体，清晰帧的得分往往只比虚化帧高 1～2 倍，指数太小（实测 4～6）会让虚化帧按比例混进来，整块发软。`SMOOTH_RADIUS` 与指数是调节清晰度/自然度的主要旋钮。
+
+**为什么不用「逐像素挑最清晰的一张」（argmax）？**
+单从清晰度看，argmax 甚至略好于加权融合，但它对本项目有一个致命问题：手机镜头在变焦时**视场角会变**（呼吸效应）。实测同一场景在最近与最远对焦之间，画面中心位移约 0，而边缘可达 35 像素（工作分辨率下约 1% 的尺度变化）。逐像素硬挑会在高对比度边缘、以及"没有真正对上焦但边缘很强"的区域，把来自不同帧、位置略有差异的边缘拼在一起，撕出可见的锯齿状白斑。加权融合的过渡是连续的，天然没有这种拼接痕迹，代价是在低对比度区域略微偏软。要真正用好 argmax，需要先做几何对齐（见路线图）。
 
 **增益对齐解决什么？**
 连拍过程中 HAL 可能重新测光、调整白平衡，导致不同帧整体亮度或色温有差异。若不补偿，逐像素选帧会在画面里留下斑块状的亮度/色彩跳变。按通道均值比例把每帧对齐到第一帧，相当于做了一次粗粒度的亮度/白平衡统一，代价很小。
@@ -594,7 +597,7 @@ out(x,y) = clamp(round(sum[c](x,y) / max(weightT(x,y), 1e-6)), 0, 255)
 | `SMOOTH_RADIUS` | `3` | 清晰度分数箱式模糊半径 |
 | `MIN_PARALLEL_ROWS` | `256` | 行数低于此值不并行 |
 | `THREAD_COUNT` | `availableProcessors().coerceIn(2, 4)` | 图像处理线程数 |
-| `HIST_BINS` / `HIST_DIVISOR` | `256` / `4f` | 旧分位数方案遗留，**当前未使用** |
+| `WEIGHT_GAMMA` | `12f` | 融合权重指数（越大越接近"只挑最清晰那张"） |
 
 `MainActivity` / UI：
 
@@ -631,7 +634,7 @@ out(x,y) = clamp(round(sum[c](x,y) / max(weightT(x,y), 1e-6)), 0, 255)
 7. **Android 8.x（API 26–27）导入照片不处理 EXIF 方向**：`ImageDecoder` 需要 API 28+，低版本回退 `BitmapFactory` 不会自动旋转，结果方向可能不对。
 8. **UI 全部硬编码中文**，`strings.xml` 只有 `app_name`，没有英文字符串资源，也没有国际化/深色模式专项适配（主题是 DayNight，但颜色写死为黑底）。
 9. **`debugKeepFrames` 默认为 `true`**，会把每次拍摄的原图写到 `Pictures/FocusStack/_debug`，涉及隐私与存储，发布前必须处理。
-10. **文件/类名不一致**：`FocusStackProcessor.kt` 里定义的类是 `FocusStacker`；`percentile()`、`HIST_BINS`、`HIST_DIVISOR`、`histogram` 是早期分位数方案遗留的死代码；`CameraController.clearLockedFocus()` 无调用点。
+10. **文件/类名不一致**：`FocusStackProcessor.kt` 里定义的类是 `FocusStacker`；`CameraController.clearLockedFocus()` 无调用点。
 11. **没有单元测试 / 仪器测试 / lint 基线**；CI 本轮才补上（`.github/workflows/android.yml` 只做 JDK 17 + `./gradlew assembleDebug`，不上传签名包），测试仍缺失。
 12. **构建脚本不可移植**：`build_apk.sh` 硬编码 `~/android-toolchain/jdk-17*`、`~/Library/Android/sdk`、`~/android-toolchain/gradle-8.4/bin/gradle`；`install_apk.sh` 硬编码 `~/Library/Android/sdk/platform-tools/adb`。只适合作者本机，其他贡献者请用 Android Studio 或 `./gradlew`。
 13. **release 签名依赖本地文件**：`keystore.properties` 与 `*.jks` 被 `.gitignore` 排除；没有配置时 `assembleRelease` 产出的是未签名 APK，而 `build_apk.sh` 打印的是 `app-release.apk` 路径，会指错文件。
@@ -706,23 +709,22 @@ export ANDROID_HOME=/path/to/Android/sdk
 | --- | --- | --- |
 | `MainActivity` | `MainActivity.kt` | `SurfaceTexture 就绪 尺寸=...`、`SurfaceTexture 尺寸变化`、保存/读取照片失败 |
 | `CameraController` | `CameraController.kt` | `预览尺寸选定：...`、`点按对焦：view=... region=...`、`点按对焦锁定：屈光度=...`、`使用已锁定的第一焦点：屈光度=...`、`扫焦序列（屈光度）=[...]`、拍摄/对焦失败原因 |
-| `FocusStacker` | `FocusStackProcessor.kt` | `frame#N 基准=... 倍数网格: ...`、`解码失败`、`外部照片解码失败` |
+| `FocusStacker` | `FocusStackProcessor.kt` | `解码失败`、`外部照片解码失败` |
 
 ```bash
 adb logcat -s MainActivity:D CameraController:D FocusStacker:D
 ```
 
-#### 调试帧与 debugScores
+#### 画质调试建议
 
-- `MainActivity.debugKeepFrames`（默认 `true`）同时控制两件事：
-  1. 每张相机 JPEG 另存到 `Pictures/FocusStack/_debug/frame_<序号>.jpg`（`ioExecutor` 异步写，序号来自 `AtomicInteger`，进程内递增）；
-  2. 传给 `FocusStacker.debugScores`，触发每张处理时的 6×8 网格日志："相对清晰度倍数"（`score / basis`，1.0 约等于该帧平均水平，越大越清晰）。
-- 验证完记得把该标志改回 `false`，并清理 `_debug` 目录。
-- 网格日志样例（每行 8 个数、6 行）：
+调试融合效果时，最有用的做法是**把连拍原图和合成结果都取出来，用同一块区域做客观对比**，而不是只看成片"感觉"：
 
-```text
-frame#1 基准=3.21 倍数网格:   2.1   1.8   1.4 ... | ...
-```
+1. 临时在 `onCaptured(jpeg)` 里把每张 JPEG 存到 `Pictures/FocusStack/_debug/frame_<序号>.jpg`（用 `MediaStore`，和保存结果同样的写法），拍一次后 `adb pull /sdcard/Pictures/FocusStack/_debug`；
+2. 在电脑上用 Pillow/numpy 复现 `mergeOneImage()` 的流程，试不同 `WEIGHT_GAMMA` / `SMOOTH_RADIUS`，用**区域梯度能量**（`|Δx| + |Δy|` 的均值）量化清晰度；
+3. 关键指标是「合成结果 / 该区域最清晰单帧」的比值，正常应 ≥ 1.0（因为不同区域来自不同帧，可以超过 1）；**比值 < 0.9 的块**就是融合没挑对的地方。
+4. 注意梯度能量会被噪声/拼接痕迹抬高，量化指标必须配合肉眼检查裁剪图，否则容易把"斑点很多"误判成"很清晰"。
+
+> 历史教训：曾用「逐帧分位数 + 累积全局基准」做归一化，客观指标看起来正常，成片却整块发软——因为先处理的帧权重被放大。**上线前一定要用真机原图做同场景对比验证。**
 
 #### 手工验证建议
 
@@ -792,7 +794,7 @@ API 29+ 用 `IS_PENDING` 保护，写入完成后才解除；部分相册 App �
 **Q6：如何改对焦步数 / 清晰度平滑半径？**
 - 连拍张数：`MainActivity.FOCUS_STEP_COUNT`（当前 7），同时看 `CameraController.startSweepAround()` 里的 `half` 与 `DIOPTER_STEP_FACTOR`（当前 1/4）。
 - 平滑半径：`FocusStacker.SMOOTH_RADIUS`（当前 3），调大更平滑但会削弱局部选择。
-- 选择强度：`mergeOneImage()` 里的 `weight = 1 + r^6`，把指数调大更"硬"（更锐利但更易接缝），调小更柔和。
+- 选择强度：`mergeOneImage()` 里的 `weight = 1 + r^12`，把指数调大更"硬"（更锐利但更易接缝），调小更柔和。
 - 输出分辨率：`WORK_SAMPLE_SIZE`（当前 2），改成 1 是全分辨率但内存约 4 倍，风险很高。
 
 **Q7：为什么说拍 7 张，实际只看到 5 张？**
@@ -1271,13 +1273,13 @@ Implementation details:
 #### 6.3 Why these choices?
 
 **Why weighted fusion instead of "pick the sharpest frame"?**
-Out-of-focus regions are not truly uniform: sensor noise and JPEG compression create random colour noise in blurred backgrounds. A hard argmax easily mistakes a noisy pixel for a sharp one, producing coloured speckles and hard seams. With weighted fusion, detail-free areas have `score/basis ≈ 1` and all weights ≈1, which averages the frames: noise cancels and the bokeh transition stays natural. Only where real edges exist does the sharpest frame's weight dominate. The price is the accumulator memory, and slight misalignment between frames gets averaged into more complex ghosting (see limitations).
+Out-of-focus regions are not truly uniform: sensor noise and JPEG compression create random colour noise in blurred backgrounds. A hard argmax easily mistakes a noisy pixel for a sharp one, producing coloured speckles and hard seams. Weighted fusion averages those areas instead, so noise cancels and the bokeh transition stays natural. Only where real edges exist does the sharpest frame's weight dominate. The decisive argument against argmax, though, is **focus breathing**: measured on a real device, the centre of the frame does not move between the nearest and farthest focus, but the edges shift by up to 35 px (~1 % scale change). Per-pixel hard selection then stitches edges from geometrically different frames together and tears visible jagged white patches along high-contrast boundaries. Weighted fusion transitions continuously and has no such seams. See the roadmap for planned geometric alignment, which would make argmax viable.
 
 **Why mean normalisation instead of a percentile?**
-The scale of the sharpness score depends on overall image contrast: a different exposure or white balance scales `score` globally. Comparing per-frame 95th percentiles or a global fixed basis means measuring different photos with different rulers — percentiles are especially sensitive to a few high-contrast edges, inflating the basis on detail-rich frames and systematically depressing their weights. Using each frame's own mean sharpness cancels the global scaling, so `score/basis` is comparable across frames. The leftover `percentile()` / `HIST_*` code in the file is an earlier approach that is no longer called.
+The scale of the sharpness score depends on overall image contrast: a different exposure or white balance scales `score` globally. Comparing per-frame 95th percentiles or a global fixed basis means measuring different photos with different rulers — percentiles are especially sensitive to a few high-contrast edges, inflating the basis on detail-rich frames and systematically depressing their weights. Using each frame's own mean sharpness cancels the global scaling, so `score/basis` is comparable across frames. (An earlier version combined per-frame percentiles with a cumulative global basis. That was **wrong**: early frames were normalised against a much smaller basis, inflating their weights by orders of magnitude, so blurred frames outvoted later sharp ones and the whole composite came out soft. The code was removed.)
 
-**What does the 6th power do?**
-`1 + r^6` is a soft selection: `r = 1` (frame average) gives weight 2, `r = 2` gives 65, `r = 3` gives 730 — the sharpest frame dominates by orders of magnitude, so blurred frames do not bleed into the result. For `r < 1` all weights approach 1, degenerating into averaging. A larger exponent is "harder" (more seam risk), a smaller one is smoother (possibly softer). `SMOOTH_RADIUS` and the exponent are the main sharpness/naturalness knobs.
+**What does the 12th power do?**
+`1 + r^12` is a soft selection: `r = 1` (frame average) gives weight 2, `r = 2` gives 4096, `r = 3` gives 531441 — the sharpest frame dominates by orders of magnitude, so blurred frames do not bleed into the result. For `r < 1` all weights approach 1, degenerating into averaging. A larger exponent is "harder" (more seam risk), a smaller one is smoother (possibly softer). The exponent must be steep enough: for low-contrast subjects such as small print on white paper, the sharp frame's local score is often only 1–2× the blurred ones, and an exponent of 4–6 lets the blurred frames blend in and soften the whole area. `SMOOTH_RADIUS` and the exponent are the main sharpness/naturalness knobs.
 
 **What does gain alignment solve?**
 During a burst the HAL may re-meter or adjust white balance, so frames can differ in overall brightness or colour temperature. Without compensation, per-pixel frame selection leaves patchy brightness/colour jumps in the output. Scaling each frame's channel means to the first frame is a cheap, coarse brightness/white-balance normalisation.
@@ -1407,7 +1409,7 @@ Debug caveat: `MainActivity.debugKeepFrames` is currently hard-coded to `true` (
 | `SMOOTH_RADIUS` | `3` | Box-blur radius for sharpness scores |
 | `MIN_PARALLEL_ROWS` | `256` | Below this row count, run serially |
 | `THREAD_COUNT` | `availableProcessors().coerceIn(2, 4)` | Imaging thread count |
-| `HIST_BINS` / `HIST_DIVISOR` | `256` / `4f` | Legacy percentile approach, **currently unused** |
+| `WEIGHT_GAMMA` | `12f` | Fusion weight exponent (larger ≈ closer to "pick the sharpest frame") |
 
 `MainActivity` / UI:
 
@@ -1444,7 +1446,7 @@ Ordered roughly by impact, to help you pick a contribution:
 7. **Android 8.x (API 26–27) does not handle EXIF orientation on import.** `ImageDecoder` needs API 28+; the `BitmapFactory` fallback does not auto-rotate, so results may come out sideways.
 8. **All UI text is hard-coded in Chinese.** `strings.xml` has only `app_name`; there are no English resources, and no dedicated dark-mode work (the theme is DayNight, but colours are hard-coded black).
 9. **`debugKeepFrames` defaults to `true`.** Every captured frame is written to `Pictures/FocusStack/_debug`, a privacy and storage concern that must be addressed before release.
-10. **Filename/class mismatch:** `FocusStackProcessor.kt` defines `FocusStacker`. `percentile()`, `HIST_BINS`, `HIST_DIVISOR`, and `histogram` are dead code from the earlier percentile approach; `CameraController.clearLockedFocus()` has no callers.
+10. **Filename/class mismatch:** `FocusStackProcessor.kt` defines `FocusStacker`. `CameraController.clearLockedFocus()` has no callers.
 11. **No unit tests, instrumentation tests, or lint baseline.** CI is only being added this round (`.github/workflows/android.yml` runs JDK 17 + `./gradlew assembleDebug`, without signing artifacts); tests are still missing.
 12. **Build scripts are not portable.** `build_apk.sh` hard-codes `~/android-toolchain/jdk-17*`, `~/Library/Android/sdk`, and `~/android-toolchain/gradle-8.4/bin/gradle`; `install_apk.sh` hard-codes `~/Library/Android/sdk/platform-tools/adb`. They only work on the author's machine; other contributors should use Android Studio or `./gradlew`.
 13. **Release signing depends on local files.** `keystore.properties` and `*.jks` are excluded by `.gitignore`. Without them, `assembleRelease` produces an unsigned APK while `build_apk.sh` still prints the `app-release.apk` path, pointing at a file that does not exist.
@@ -1519,23 +1521,22 @@ export ANDROID_HOME=/path/to/Android/sdk
 | --- | --- | --- |
 | `MainActivity` | `MainActivity.kt` | `SurfaceTexture 就绪 尺寸=...`, `SurfaceTexture 尺寸变化`, save/read failures |
 | `CameraController` | `CameraController.kt` | `预览尺寸选定：...`, `点按对焦：view=... region=...`, `点按对焦锁定：屈光度=...`, `使用已锁定的第一焦点：屈光度=...`, `扫焦序列（屈光度）=[...]`, capture/focus failure reasons |
-| `FocusStacker` | `FocusStackProcessor.kt` | `frame#N 基准=... 倍数网格: ...`, `解码失败`, `外部照片解码失败` |
+| `FocusStacker` | `FocusStackProcessor.kt` | `解码失败`, `外部照片解码失败` |
 
 ```bash
 adb logcat -s MainActivity:D CameraController:D FocusStacker:D
 ```
 
-#### Debug frames and debugScores
+#### Debugging image quality
 
-- `MainActivity.debugKeepFrames` (currently `true`) controls two things:
-  1. Each camera JPEG is also written to `Pictures/FocusStack/_debug/frame_<n>.jpg` (asynchronously on `ioExecutor`; the index comes from an `AtomicInteger` and grows within the process);
-  2. It is assigned to `FocusStacker.debugScores`, which logs a 6×8 grid per frame of "relative sharpness multiples" (`score / basis`; 1.0 ≈ that frame's average, higher is sharper).
-- Remember to set the flag back to `false` after verification and clean up the `_debug` directory.
-- Sample grid log (8 numbers per row, 6 rows):
+The most useful method is to **pull the bracket frames and the composite and compare objectively on the same region**, instead of judging by eye alone:
 
-```text
-frame#1 基准=3.21 倍数网格:   2.1   1.8   1.4 ... | ...
-```
+1. Temporarily write each JPEG in `onCaptured(jpeg)` to `Pictures/FocusStack/_debug/frame_<n>.jpg` via `MediaStore` (same pattern as saving the result), capture once, then `adb pull /sdcard/Pictures/FocusStack/_debug`.
+2. On a computer, reproduce `mergeOneImage()` with Pillow/numpy and sweep `WEIGHT_GAMMA` / `SMOOTH_RADIUS`, measuring sharpness as **regional gradient energy** (mean of `|Δx| + |Δy|`).
+3. The key metric is "composite ÷ best single frame in that region", which should normally be ≥ 1.0 (regions come from different frames, so it can exceed 1). Blocks **below 0.9** are where fusion picked wrong.
+4. Gradient energy is inflated by noise and seams, so always eyeball crops alongside the numbers — otherwise a speckled result can look "very sharp" to the metric.
+
+> Lesson learned: a "per-frame percentile + cumulative global basis" normalisation once looked fine in metrics while producing a uniformly soft composite, because early frames' weights were inflated. **Always validate with real bracketed frames from the device before shipping.**
 
 #### Manual verification
 
@@ -1605,7 +1606,7 @@ On API 29+ the `IS_PENDING` flag protects the row until writing completes; some 
 **Q6: How do I change the focus step count or the sharpness smoothing radius?**
 - Burst length: `MainActivity.FOCUS_STEP_COUNT` (currently 7), together with `half` and `DIOPTER_STEP_FACTOR` (currently 1/4) in `CameraController.startSweepAround()`.
 - Smoothing: `FocusStacker.SMOOTH_RADIUS` (currently 3); larger is smoother but weakens local selection.
-- Selection strength: `weight = 1 + r^6` in `mergeOneImage()`; a larger exponent is "harder" (sharper, more seam-prone), a smaller one is softer.
+- Selection strength: `weight = 1 + r^12` in `mergeOneImage()`; a larger exponent is "harder" (sharper, more seam-prone), a smaller one is softer.
 - Output resolution: `WORK_SAMPLE_SIZE` (currently 2); 1 means full resolution at roughly 4× memory, which is very risky.
 
 **Q7: Why do I see only 5 frames when the app says 7?**

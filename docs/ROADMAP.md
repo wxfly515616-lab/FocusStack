@@ -35,10 +35,11 @@
 
 #### [ ] R1 图像几何对齐（平移 / 旋转配准）
 
-- **现状**：`FocusStacker.consume()` 直接把每帧按同一像素坐标累加，默认所有照片完全重合。手持或支架轻微移动会产生重影，这是当前最大的画质瓶颈。
-- **目标**：融合前把第 2…N 帧配准到第 1 帧，显著降低手持重影，同时不损失静物场景的清晰度。
+- **现状**：`FocusStacker.consume()` 直接把每帧按同一像素坐标累加，默认所有照片完全重合。手持或支架轻微移动会产生重影，这是当前最大的画质瓶颈。实测还发现：即使手机完全静止，镜头在变焦（改变对焦距离）时**视场角也会变化**（呼吸效应）——同一场景在最远与最近对焦之间，画面中心位移约 0、边缘可达 35 像素（工作分辨率下约 1% 尺度变化）。这正是当前必须用"加权融合"而不能用"逐像素挑最清晰一张"的原因：硬挑会在高对比度边缘撕出锯齿状白斑。
+- **目标**：融合前把第 2…N 帧配准到第 1 帧（含呼吸效应引起的尺度变化），显著降低重影与边缘撕裂，同时不损失静物场景的清晰度；配准做好后可以考虑重新评估 argmax 融合。
 - **实现建议**：
   - 先做灰度金字塔上的相位相关（phase correlation）估计平移（整数 + 亚像素抛物线插值），复杂度低、对亮度变化鲁棒；
+  - 尺度/呼吸效应估计：对画面左右（或四角）分别估计平移，用位移随位置的变化拟合尺度；也可对极坐标幅度谱做相关；
   - 旋转可以用小角度搜索（±2°、0.25° 步长）配合互信息/归一化互相关，或引入 OpenCV 的 `findTransformECC`（新增依赖请先开 Issue 讨论）；
   - 只对降采样工作图（约 3MP）做配准，映射回原图时注意边界裁剪；对齐失败（置信度低）时回退到不对齐；
   - 新增 `ImageAligner` 类，保持 `FocusStacker` API 不变。
@@ -166,8 +167,8 @@
 
 #### [ ] R14 代码清理
 
-- **目标**：重命名 `FocusStackProcessor.kt` → `FocusStacker.kt`；删除未使用的 `percentile()` / `HIST_*` 死代码与无关注释；清理未使用 import；统一命名。
-- **验收标准**：编译与 lint 无新增警告；`git grep percentile` 为空；无行为变化。
+- **目标**：重命名 `FocusStackProcessor.kt` → `FocusStacker.kt`；清理未使用 import；统一命名。（早期分位数方案的 `percentile()` / `HIST_*` 死代码已在融合算法重写时删除。）
+- **验收标准**：编译与 lint 无新增警告；无行为变化。
 - **难度**：🟢
 
 #### [ ] R15 构建与发布工程化
@@ -382,8 +383,8 @@ Difficulty: 🟢 newcomer-friendly · 🟡 Android experience needed · 🔴 alg
 
 #### [ ] R14 Code cleanup
 
-- **Goal**: Rename `FocusStackProcessor.kt` → `FocusStacker.kt`; delete unused `percentile()` / `HIST_*` dead code and stale comments; remove unused imports; unify naming.
-- **Acceptance criteria**: No new compiler/lint warnings; `git grep percentile` empty; no behavior change.
+- **Goal**: Rename `FocusStackProcessor.kt` → `FocusStacker.kt`; remove unused imports; unify naming. (The `percentile()` / `HIST_*` dead code from the early percentile approach was already deleted when the fusion algorithm was rewritten.)
+- **Acceptance criteria**: No new compiler/lint warnings; no behaviour change.
 - **Difficulty**: 🟢
 
 #### [ ] R15 Build and release engineering
