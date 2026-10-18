@@ -6,10 +6,13 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
+import android.view.MotionEvent
 import android.view.TextureView
 import android.view.View
 import android.widget.Button
@@ -17,6 +20,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -29,9 +34,30 @@ import java.util.concurrent.RejectedExecutionException
 class MainActivity : AppCompatActivity() {
 
     companion object {
+        private const val TAG = "MainActivity"
         private const val REQUEST_CAMERA_PERMISSION = 100
         private const val REQUEST_STORAGE_PERMISSION = 101
         private const val FOCUS_STEP_COUNT = 7
+        private const val MAX_IMPORT_IMAGES = 20
+        private const val PREFS_NAME = "focusstack"
+        private const val PREF_HELP_SHOWN = "help_shown"
+
+        private const val HELP_TEXT =
+            "【这个 App 能做什么】\n" +
+                "把多张「对焦点不同」的照片自动合成一张「全都清晰」的照片（专业叫法：焦点堆叠 / 景深合成）。\n" +
+                "适合拍花蕊、昆虫、首饰、纹理等手机一次拍不全清晰的小物件。\n\n" +
+                "【两种用法】\n" +
+                "① 直接拍：点「拍摄合成」。App 先自动对焦锁定主体，再以锁定点为中心\n" +
+                "   前后各拍 3 张（共 7 张不同焦点）自动合成。\n" +
+                "② 用相册照片：点「相册合成」，从相册选 2～20 张同一场景、焦点不同的照片导入合成。\n\n" +
+                "【拍摄注意】\n" +
+                "· 手要稳：可借助桌面、书本或三脚架\n" +
+                "· 光线越充足，效果越好\n" +
+                "· 拍摄对象与手机都要保持静止\n" +
+                "· 中途想中止，点「取消拍摄」\n\n" +
+                "【结果】\n" +
+                "点「保存到相册」保存，位置：相册 → Pictures/FocusStack\n\n" +
+                "开发者：Wxf8555"
     }
 
     private lateinit var textureView: TextureView
@@ -39,21 +65,33 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressLayout: LinearLayout
     private lateinit var progressText: TextView
     private lateinit var btnCapture: Button
+    private lateinit var btnPickPhotos: Button
     private lateinit var btnSave: Button
     private lateinit var btnRetake: Button
     private lateinit var btnCancelCapture: Button
+    private lateinit var btnHelp: Button
+    private lateinit var focusRing: View
+    private val ringHider = Runnable { focusRing.visibility = View.GONE }
+    private var lastFocusX = -1f
+    private var lastFocusY = -1f
 
     private lateinit var cameraController: CameraController
     private var lastResultBitmap: Bitmap? = null
     private var isCapturing = false
     private var isSaving = false
     private var resumed = false
+    private var helpChecked = false
 
     /** 合成专用单线程：保证同一次拍摄的图片按序处理，也防止重复触发合成 */
     private val stackExecutor = Executors.newSingleThreadExecutor()
 
     /** 保存照片用，避免在 UI 线程压缩/写盘 */
     private val ioExecutor = Executors.newSingleThreadExecutor()
+
+    /** 从相册多选照片（Android 自带的文件/照片选择器，无需存储权限） */
+    private val pickImagesLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris -> if (uris.isNotEmpty()) startStackFromUris(uris) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,22 +102,43 @@ class MainActivity : AppCompatActivity() {
         progressLayout = findViewById(R.id.progressLayout)
         progressText = findViewById(R.id.progressText)
         btnCapture = findViewById(R.id.btnCapture)
+        btnPickPhotos = findViewById(R.id.btnPickPhotos)
         btnSave = findViewById(R.id.btnSave)
         btnRetake = findViewById(R.id.btnRetake)
         btnCancelCapture = findViewById(R.id.btnCancelCapture)
+        btnHelp = findViewById(R.id.btnHelp)
+        focusRing = findViewById(R.id.focusRing)
 
         cameraController = CameraController(this, textureView)
-        cameraController.onPreviewReady = { runOnUiThread { applyTransform() } }
         cameraController.onCameraError = { msg -> runOnUiThread { showToast(msg) } }
+        cameraController.onTapFocusResult = { ok ->
+            runOnUiThread {
+                if (ok) {
+                    focusRing.removeCallbacks(ringHider)
+                    focusRing.postDelayed(ringHider, 1500)
+                    showToast("已在点击位置锁定主体焦点")
+                } else {
+                    showToast("对焦没成功，请对着有纹理的地方再点一下")
+                }
+            }
+        }
+
+        // 点屏幕：在对焦位置对焦并锁定，作为「第一焦点」
+        textureView.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_UP && !isCapturing) {
+                tapToFocus(event.x, event.y)
+            }
+            true
+        }
 
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                applyTransform()
+                Log.d(TAG, "SurfaceTexture 就绪 尺寸=${width}x$height")
                 if (resumed && hasCameraPermission()) startCamera()
             }
 
             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                applyTransform()
+                Log.d(TAG, "SurfaceTexture 尺寸变化 尺寸=${width}x$height")
             }
 
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
@@ -87,8 +146,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnCapture.setOnClickListener { startCaptureStack() }
+        btnPickPhotos.setOnClickListener { pickImagesLauncher.launch(arrayOf("image/*")) }
         btnSave.setOnClickListener { saveResult() }
         btnRetake.setOnClickListener { backToPreview() }
+        btnHelp.setOnClickListener { showHelp() }
         // 用户主动取消：CameraController 会回调 onError("拍摄已取消")，由此统一复位界面
         btnCancelCapture.setOnClickListener { cameraController.cancelStack() }
     }
@@ -105,13 +166,37 @@ class MainActivity : AppCompatActivity() {
         startCamera()
     }
 
+    /** 点屏幕对焦：在对焦位置显示对焦框，并让相机在该处对焦锁定 */
+    private fun tapToFocus(x: Float, y: Float) {
+        lastFocusX = x
+        lastFocusY = y
+        showFocusRing()
+        cameraController.tapToFocus(x, y, textureView.width, textureView.height)
+    }
+
+    private fun showFocusRing() {
+        if (lastFocusX < 0f) return
+        val size = if (focusRing.width > 0) focusRing.width else
+            (90 * resources.displayMetrics.density).toInt()
+        focusRing.x = lastFocusX - size / 2f
+        focusRing.y = lastFocusY - size / 2f
+        focusRing.visibility = View.VISIBLE
+        focusRing.removeCallbacks(ringHider)
+        focusRing.postDelayed(ringHider, 1600)
+    }
+
+    private fun hideFocusRing() {
+        focusRing.removeCallbacks(ringHider)
+        focusRing.visibility = View.GONE
+    }
+
     /** 启动相机（onResume 与相机权限通过后共用，不再手动重入 onResume） */
     private fun startCamera() {
         cameraController.startBackgroundThread()
         if (textureView.isAvailable) {
-            applyTransform()
             cameraController.openCamera()
         }
+        maybeShowHelpOnFirstLaunch()
     }
 
     override fun onPause() {
@@ -155,19 +240,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 根据屏幕旋转与传感器方向修正预览显示 */
-    private fun applyTransform() {
-        @Suppress("DEPRECATION")
-        val rotation = windowManager.defaultDisplay.rotation
-        cameraController.configureTransform(textureView.width, textureView.height, rotation)
+    /** 首次安装打开时自动弹出一次使用说明 */
+    private fun maybeShowHelpOnFirstLaunch() {
+        if (helpChecked) return
+        helpChecked = true
+        val sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        if (!sp.getBoolean(PREF_HELP_SHOWN, false)) {
+            sp.edit().putBoolean(PREF_HELP_SHOWN, true).apply()
+            btnHelp.post { showHelp() }
+        }
     }
+
+    private fun showHelp() {
+        AlertDialog.Builder(this)
+            .setTitle("使用说明")
+            .setMessage(HELP_TEXT)
+            .setPositiveButton("知道了", null)
+            .show()
+    }
+
+    // ---------------- 相机连拍合成 ----------------
 
     private fun startCaptureStack() {
         if (isCapturing) return
         isCapturing = true
-        btnCapture.isEnabled = false
+        setBusyForPreview(true)
         progressLayout.visibility = View.VISIBLE
-        progressText.text = "正在拍摄第 1/$FOCUS_STEP_COUNT 张，请保持手机静止..."
+        progressText.text = if (cameraController.lockedDiopter > 0f) {
+            "第一焦点已锁定，正在它前后各拍 3 张..."
+        } else {
+            "正在自动对焦锁定主体，请保持手机静止..."
+        }
 
         val stacker = FocusStacker(cameraController.sensorOrientation)
 
@@ -179,6 +282,10 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     progressText.text = "正在拍摄第 ${index + 1}/$total 张，请保持手机静止..."
                 }
+            }
+
+            override fun onHint(message: String) {
+                runOnUiThread { if (!cancelled) progressText.text = message }
             }
 
             /** 相机后台线程回调：立刻把这张交给合成线程，与后续拍摄并行处理 */
@@ -223,6 +330,67 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    // ---------------- 相册照片合成 ----------------
+
+    private fun startStackFromUris(uris: List<Uri>) {
+        if (isCapturing) return
+        val selected = uris.take(MAX_IMPORT_IMAGES)
+        if (selected.size < 2) {
+            showToast("至少选择 2 张照片")
+            return
+        }
+        if (uris.size > MAX_IMPORT_IMAGES) {
+            showToast("最多支持 $MAX_IMPORT_IMAGES 张，已使用前 $MAX_IMPORT_IMAGES 张")
+        }
+
+        isCapturing = true
+        setBusyForPreview(true)
+        progressLayout.visibility = View.VISIBLE
+        progressText.text = "正在读取照片 1/${selected.size}..."
+
+        // EXIF 方向已由 ImageDecoder 摆正，因此合成结果不再额外旋转
+        val stacker = FocusStacker(0)
+
+        executeQuietly(stackExecutor) {
+            try {
+                var ok = 0
+                selected.forEachIndexed { index, uri ->
+                    val bytes = readUriBytes(uri)
+                    if (bytes != null) {
+                        try {
+                            stacker.addExternalImage(bytes)
+                            ok++
+                        } catch (e: OutOfMemoryError) {
+                            runOnUiThread { failAndReset("内存不足，请减少照片数量或关闭其他应用后重试") }
+                            return@executeQuietly
+                        }
+                    }
+                    runOnUiThread { progressText.text = "正在合成第 ${index + 1}/${selected.size} 张..." }
+                }
+                if (ok < 2) {
+                    runOnUiThread { failAndReset("至少需要 2 张可正常读取的照片") }
+                    return@executeQuietly
+                }
+                runOnUiThread { progressText.text = "正在生成结果..." }
+                val result = stacker.finish()
+                runOnUiThread { showResult(result) }
+            } catch (e: OutOfMemoryError) {
+                runOnUiThread { failAndReset("内存不足，请减少照片数量或关闭其他应用后重试") }
+            } catch (e: Exception) {
+                runOnUiThread { failAndReset("合成失败：${e.message}") }
+            }
+        }
+    }
+
+    private fun readUriBytes(uri: Uri): ByteArray? {
+        return try {
+            contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        } catch (e: Exception) {
+            Log.e(TAG, "读取照片失败：$uri", e)
+            null
+        }
+    }
+
     /** Executor 已关闭（Activity 销毁）时静默丢弃任务 */
     private fun executeQuietly(executor: ExecutorService, task: Runnable) {
         try {
@@ -240,11 +408,13 @@ class MainActivity : AppCompatActivity() {
     private fun showResult(bitmap: Bitmap) {
         lastResultBitmap = bitmap
         isCapturing = false
+        hideFocusRing()
         progressLayout.visibility = View.GONE
         textureView.visibility = View.GONE
         resultImageView.visibility = View.VISIBLE
         resultImageView.setImageBitmap(bitmap)
         btnCapture.visibility = View.GONE
+        btnPickPhotos.visibility = View.GONE
         btnSave.visibility = View.VISIBLE
         btnSave.isEnabled = true
         btnRetake.visibility = View.VISIBLE
@@ -258,6 +428,8 @@ class MainActivity : AppCompatActivity() {
         btnSave.visibility = View.GONE
         btnRetake.visibility = View.GONE
         resetToPreviewState()
+        // 如果之前锁定过第一焦点，把对焦框再显示出来，让用户知道焦点在哪
+        if (cameraController.lockedDiopter > 0f) showFocusRing()
     }
 
     private fun resetToPreviewState() {
@@ -265,7 +437,17 @@ class MainActivity : AppCompatActivity() {
         progressLayout.visibility = View.GONE
         btnCapture.visibility = View.VISIBLE
         btnCapture.isEnabled = true
+        btnPickPhotos.visibility = View.VISIBLE
+        btnPickPhotos.isEnabled = true
     }
+
+    /** 拍摄/合成进行中禁用底部按钮，避免重复触发 */
+    private fun setBusyForPreview(busy: Boolean) {
+        btnCapture.isEnabled = !busy
+        btnPickPhotos.isEnabled = !busy
+    }
+
+    // ---------------- 保存 ----------------
 
     private fun saveResult() {
         val bitmap = lastResultBitmap ?: return
@@ -317,6 +499,7 @@ class MainActivity : AppCompatActivity() {
             values.put(MediaStore.Images.Media.IS_PENDING, 0)
             contentResolver.update(uri, values, null, null)
             showToast("已保存到相册 / Pictures/FocusStack")
+            returnToPreviewSoon()
         } else {
             contentResolver.delete(uri, null, null)
             showToast("保存失败")
@@ -333,10 +516,18 @@ class MainActivity : AppCompatActivity() {
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
             MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf("image/jpeg"), null)
             showToast("已保存到相册 / Pictures/FocusStack")
+            returnToPreviewSoon()
         } catch (e: IOException) {
             showToast("保存失败：${e.message}")
         }
         finishSaving()
+    }
+
+    /** 保存成功后稍作停顿再回到预览，方便继续拍摄下一张 */
+    private fun returnToPreviewSoon() {
+        window.decorView.postDelayed({
+            if (!isFinishing && !isDestroyed) backToPreview()
+        }, 800)
     }
 
     /** 保存结束（成功或失败）后恢复按钮状态 */
